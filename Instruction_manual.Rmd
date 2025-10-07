@@ -1,0 +1,523 @@
+---
+title: "Inscructions for Reproducing Codes"
+author: "Marginal Causal Effect Estimation with Continuous Instrumental Variables"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+rm(list = ls(envir = .GlobalEnv, all.names = TRUE), envir = .GlobalEnv)
+
+setwd("/Users/mei/Library/Mobile Documents/com~apple~CloudDocs/PhD/Thesis/project1/code/simulation/code_ATE_continuousIV/")
+source("fun_generate_data.R")
+source("fun_estimation.R")
+source("fun_one_sim.R")
+library(foreach)
+library(doParallel)
+library(doRNG)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+```{r, echo=FALSE}
+########### functions for formating data for table
+## function for keeping 4 significant digits
+sig4_latex <- function(x) {
+  sapply(x, function(v) {
+    if (is.na(v)) return("NA")
+    if (!is.finite(v)) return(as.character(v))  # "Inf"/"-Inf"
+    if (v == 0) {
+      out <- "0.0000"                           
+      return(out)
+    }
+    y <- signif(v, 4)                            
+    a <- abs(y)
+    
+    if (a >= 1) {
+      left <- floor(log10(a)) + 1                
+      dec  <- max(0, 4 - left)
+    } else {
+      e     <- floor(log10(a))                   
+      zeros <- -e - 1                            
+      dec   <- zeros + 4                         
+    }
+    
+    out <- format(round(y, dec),
+                  nsmall = dec, trim = TRUE, scientific = FALSE)
+    sub("^-", "$-$", out)                       
+  })
+}
+
+## summarize the metrics: bias, se, rmse
+summarize_metrics <- function(dat, vars) {
+  mu   <- colMeans(dat[, vars])
+  bias <- mu[vars] - ATE.true
+  se   <- apply(dat[, vars, drop = FALSE], 2, sd) / sqrt(reps)
+  rmse <- sqrt(bias^2 + apply(dat[, vars, drop = FALSE], 2, var))
+  list(bias = bias, se = se, rmse = rmse)
+}
+
+## format bias and se
+fmt_bias_se <- function(bias, se, mult_bias = 1, mult_se = 1) {
+  b <- sig4_latex(bias * mult_bias)
+  s <- sig4_latex(se   * mult_se)
+  sprintf("%s (%s)", b, s)
+}
+## format rmse
+fmt_rmse <- function(rmse) sig4_latex(rmse)
+
+scale_label <- function(name, mult) {
+  if (mult == 1) name else sprintf("%s $\\times$ %d", name, mult)
+}
+scale_bias <- 1000  # set to 1 to leave Bias unscaled
+scale_se   <- 1000  # set to 1 to leave SE unscaled
+bias_se_label <- sprintf("%s (%s)",
+                         scale_label("Bias", scale_bias),
+                         scale_label("SE",   scale_se))
+```
+
+We setup parallel backend to use many processors.
+```{r, echo=FALSE}
+## this corresponds to 11 cores
+ncores_use <- max(1, parallel::detectCores() - 1)
+print(paste("cores =", ncores_use))
+```
+
+For each setting, we consider five different scenarios.
+```{r, echo=FALSE}
+scenarios <- c("allcorrect", "M1", "M2", "M3", "allwrong")
+scenario_labels <- c(
+  allcorrect = "All correct",
+  M1 = "M1 correct",
+  M2 = "M2 correct",
+  M3 = "M3 correct",
+  allwrong = "All wrong"
+)
+print(unname(scenario_labels))
+```
+
+# Replicate results in Setting I
+
+## Simulation setting
+
+The basic setup of the simulation Setting I is as follows.
+
+```{r}
+##sample size
+n=1000
+
+##number of replication
+reps <- 2000
+
+## \pi(X; \zeta)
+zeta.true <- c(0.1, -0.5, 1)
+
+##\delta(X; \alpha)
+alpha.true = c(0.1, 0.4, -0.5)
+
+##\delta^Z(X; \beta)
+beta.true = c(0.4, 0.1, 0.5)
+
+##E[D|X; iota]
+iota.true = c(0.5, 0.5, -1)
+
+##E[Y|X; theta]
+theta.true = c(0.1, -0.4, 0.8)
+
+############ obtain true ATE ###############
+data_temp <- data_gen(alpha.true, beta.true, iota.true, theta.true, zeta.true,
+                       n=2000000, k=0.1, sigma=1, Y.type="binary", seed=123)
+ATE.true  <- mean(data_temp$delta.true)
+```
+
+The true average treatment effect is
+```{r}
+round(mean(ATE.true), 3)
+```
+
+## Simulation results
+
+```{r, echo=FALSE, message=FALSE}
+########### RUN SETTING I ####################
+## runing all five scenarios 
+outs <- setNames(lapply(scenarios, function(sc) {
+  message("Running scenario: ", sc)
+  run_iv_sim(
+    reps = reps, 
+    n = n,
+    alpha.true = alpha.true, beta.true = beta.true,
+    iota.true = iota.true, theta.true = theta.true, zeta.true = zeta.true,
+    scenario = sc, 
+    z.type = "continuous",
+    quantile.z = NULL, 
+    ncores = ncores_use
+  )
+}), scenarios)
+```
+
+```{r, echo=FALSE}
+variable.name <- c("Delta1", "Delta2.b", "Delta3", "Delta.mr")
+
+scenarios_df <-  lapply(outs, function(o) {
+  df <- if (!is.null(o$raw)) as.data.frame(o$raw) else as.data.frame(o)
+  dplyr::select(df, dplyr::all_of(variable.name))
+})
+
+## get a long table for figure
+long_data <- scenarios_df |>
+  dplyr::bind_rows(.id = "scenario_id") |>
+  dplyr::mutate(scenario = unname(scenario_labels[scenario_id])) |>
+  dplyr::select(-scenario_id) |>
+  tidyr::pivot_longer(
+    dplyr::all_of(variable.name),
+    names_to = "variable", values_to = "value"
+  )
+```
+
+```{r, echo=FALSE}
+ggplot(long_data, aes(x = variable, y = value, fill =variable)) +
+  geom_boxplot() +
+  geom_hline(yintercept = ATE.true, linetype = "dashed", color = "red", linewidth = 1) +
+  stat_summary(fun=mean, geom="point", shape=20, size=4, color="orange", fill="orange") +
+  facet_wrap(~ factor(scenario,levels = c("All correct", "M1 correct", "M2 correct", "M3 correct", "All wrong")), nrow = 1, ncol = 5) +
+  labs(title = "",
+       x = "",
+       y = "") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        strip.text = element_text(size = 16, face = "bold"),  # Enlarge scenario labels
+        axis.title.y = element_blank(),axis.text.y = element_text(size =12, face = "bold"),
+        axis.text.x = element_text(size =14, face = "bold")) +
+  scale_fill_brewer(palette = "Pastel1") +
+  scale_x_discrete(labels = c(expression(widehat(Delta)[1]), expression(widehat(Delta)[b-2]), expression(widehat(Delta)[3]),expression(widehat(Delta)[b-tr])))+
+  scale_y_continuous(limits=c(-1,1))
+```
+
+
+```{r, echo=FALSE}
+method_labels  <- c("$\\widehat{\\Delta}_1$", "$\\widehat{\\Delta}_{b-2}$", "$\\widehat{\\Delta}_3$", "$\\widehat{\\Delta}_{b-mr}$")
+
+## get result list for 
+res_list  <- lapply(scenarios_df, summarize_metrics, vars = variable.name)
+
+bias_se_mat <- do.call(
+  rbind,
+  lapply(res_list, function(x) fmt_bias_se(x$bias, x$se,
+                                           mult_bias = scale_bias,
+                                           mult_se   = scale_se))
+)
+rmse_mat    <- do.call(rbind, lapply(res_list, function(x) fmt_rmse(x$rmse)))
+
+# set names
+rownames(bias_se_mat) <- names(scenarios_df)
+rownames(rmse_mat)    <- names(scenarios_df)
+colnames(bias_se_mat) <- method_labels
+colnames(rmse_mat)    <- method_labels
+
+vals_mat <- rbind(bias_se_mat, rmse_mat)
+
+# build the "Metric" (multirow) and "Scenario" columns
+S <- length(scenarios_df)  
+metric_col <- c(rep("Bias (SE)", S), rep("RMSE", S))
+scenario_col <- c(names(scenarios_df), names(scenarios_df))
+
+# assemble final table 
+table_df <- data.frame(
+  Metric   = metric_col,
+  Scenario = scenario_col,
+  vals_mat,
+  check.names = FALSE
+)
+
+## ---- LaTeX table -------------------------------------------------------------
+library(xtable)
+# align: Metric (l), Scenario (l), then one 'c' per method
+align_vec <- c("l", "l", "l", rep("c", length(method_labels)))
+xt <- xtable(table_df, align = align_vec,
+             caption = "Monte Carlo results of the proposed estimators in Setting I where the IV is continuous under various model misspecification scenarios. The true ATE is 0.095. Bias and Monte Carlo SE (in parentheses) are scaled by 1000")
+
+add_cmds <- list(
+  pos = list(0, S),  # before row 1 and before row S+1 (RMSE block)
+  command = c("\\hline\\hline\n", "\\hline\\hline\n")
+)
+```
+
+```{r, results='asis'}
+print(
+  xt,
+  include.rownames = FALSE,
+  caption.placement = "top",       
+  table.placement   = "!ht",        
+  hline.after = c(-1, nrow(table_df)), 
+  add.to.row = add_cmds,
+  sanitize.text.function = identity,       
+  sanitize.colnames.function = identity,
+  sanitize.rownames.function = identity
+)
+```
+
+# Replicate results in Setting II
+
+## Simulation setting
+The basic setup of the simulation Setting II is as follows.
+```{r}
+##sample size
+n=1000
+####number of replication
+reps <- 2000
+
+## \pi(X; \zeta)
+zeta.true <- c(-0.2, 0.2, 0.2)
+
+##\delta(X; \alpha)
+alpha.true = c(0.1, 0.4, -0.5)
+
+##\delta^Z(X; \beta)
+beta.true = c(0.2, 0.1, 0.5)
+
+##E[D|X; iota]
+iota.true = c(0.2, 0.5, -0.5)
+##E[Y|X; theta]
+theta.true = c(0.1, -0.4, 0.8)
+
+data_temp <- data_gen_binZ(alpha.true, beta.true, iota.true, theta.true, zeta.true,
+                           n=2000000, k=0.1, Y.type="binary", seed=123)
+
+ATE.true  <- mean(data_temp$delta.true)
+```
+The true average treatment effect is 0.95. 
+
+## Simulation results
+```{r, echo=FALSE, message=FALSE}
+########### RUN SETTING II ####################
+## runing all five scenarios 
+outs_binZ <- setNames(lapply(scenarios, function(sc) {
+  message("Running scenario: ", sc)
+  run_iv_sim(
+    reps = reps, 
+    n = n,
+    alpha.true = alpha.true, beta.true = beta.true,
+    iota.true = iota.true, theta.true = theta.true, zeta.true = zeta.true,
+    scenario = sc, 
+    z.type = "binary", 
+    quantile.z = NULL, 
+    ncores = ncores_use
+  )
+}), scenarios)
+```
+
+```{r, echo=FALSE}
+variable.name <- c("Delta1", "Delta2.b", "Delta3", "Delta.mr")
+
+scenarios_df_binZ <-  lapply(outs_binZ, function(o) {
+  df <- if (!is.null(o$raw)) as.data.frame(o$raw) else as.data.frame(o)
+  dplyr::select(df, dplyr::all_of(variable.name))
+})
+
+## get a long table for figure
+long_data2 <- scenarios_df_binZ |>
+  dplyr::bind_rows(.id = "scenario_id") |>
+  dplyr::mutate(scenario = unname(scenario_labels[scenario_id])) |>
+  dplyr::select(-scenario_id) |>
+  tidyr::pivot_longer(
+    dplyr::all_of(variable.name),
+    names_to = "variable", values_to = "value"
+  )
+```
+
+
+```{r, echo=FALSE}
+ggplot(long_data2, aes(x = variable, y = value, fill =variable)) +
+  geom_boxplot() +
+  geom_hline(yintercept = ATE.true, linetype = "dashed", color = "red", linewidth = 1) +
+  stat_summary(fun=mean, geom="point", shape=20, size=4, color="orange", fill="orange") +
+  facet_wrap(~ factor(scenario,levels = c("All correct", "M1 correct", "M2 correct", "M3 correct", "All wrong")), nrow = 1, ncol = 5) +
+  labs(title = "",
+       x = "",
+       y = "") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        strip.text = element_text(size = 16, face = "bold"),  # Enlarge scenario labels
+        axis.title.y = element_blank(),axis.text.y = element_text(size =12, face = "bold"),
+        axis.text.x = element_text(size =14, face = "bold")) +
+  scale_fill_brewer(palette = "Pastel1") +
+  scale_x_discrete(labels = c(expression(widehat(Delta)[1]), expression(widehat(Delta)[b-2]), expression(widehat(Delta)[3]),expression(widehat(Delta)[b-tr])))+
+  scale_y_continuous(limits=c(-1,1))
+```
+
+
+```{r, echo=FALSE}
+method_labels  <- c("$\\widehat{\\Delta}_1$", "$\\widehat{\\Delta}_{b-2}$", "$\\widehat{\\Delta}_3$", "$\\widehat{\\Delta}_{b-mr}$")
+
+## get result list for 
+res_list  <- lapply(scenarios_df_binZ, summarize_metrics, vars = variable.name)
+
+bias_se_mat <- do.call(
+  rbind,
+  lapply(res_list, function(x) fmt_bias_se(x$bias, x$se,
+                                           mult_bias = scale_bias,
+                                           mult_se   = scale_se))
+)
+rmse_mat    <- do.call(rbind, lapply(res_list, function(x) fmt_rmse(x$rmse)))
+
+# set names
+rownames(bias_se_mat) <- names(scenarios_df_binZ)
+rownames(rmse_mat)    <- names(scenarios_df_binZ)
+colnames(bias_se_mat) <- method_labels
+colnames(rmse_mat)    <- method_labels
+
+vals_mat <- rbind(bias_se_mat, rmse_mat)
+
+# build the "Metric" (multirow) and "Scenario" columns
+S <- length(scenarios_df_binZ)  
+metric_col <- c(rep("Bias (SE)", S), rep("RMSE", S))
+scenario_col <- c(names(scenarios_df_binZ), names(scenarios_df_binZ))
+
+# assemble final table 
+table_df <- data.frame(
+  Metric   = metric_col,
+  Scenario = scenario_col,
+  vals_mat,
+  check.names = FALSE
+)
+
+## ---- LaTeX table -------------------------------------------------------------
+library(xtable)
+# align: Metric (l), Scenario (l), then one 'c' per method
+align_vec <- c("l", "l", "l", rep("c", length(method_labels)))
+xt <- xtable(table_df, align = align_vec,
+             caption = "Monte Carlo results of proposed estimators in Setting I where the IV is binary under various model misspecification scenarios. The true value of the ATE is 0.095. Bias and MCSE (in parentheses) are scaled by 1000")
+
+add_cmds <- list(
+  pos = list(0, S),  # before row 1 and before row S+1 (RMSE block)
+  command = c("\\hline\\hline\n", "\\hline\\hline\n")
+)
+```
+
+```{r, results='asis'}
+print(
+  xt,
+  include.rownames = FALSE,
+  caption.placement = "top",       
+  table.placement   = "!ht",        
+  hline.after = c(-1, nrow(table_df)),  
+  add.to.row = add_cmds,
+  sanitize.text.function = identity,       
+  sanitize.colnames.function = identity,
+  sanitize.rownames.function = identity
+)
+```
+
+# Replicate results in Setting III
+
+To replicate results in setting III, we dichotomize IV simulated in Setting I and run the estimation methods proposed for binary IVs.
+
+```{r, echo=FALSE}
+##sample size
+n=1000
+
+####number of replication
+reps <- 2000
+
+## \pi(X; \zeta)
+zeta.true <- c(0.1, -0.5, 1)
+
+##\delta(X; \alpha)
+alpha.true = c(0.1, 0.4, -0.5)
+
+##\delta^Z(X; \beta)
+beta.true = c(0.4, 0.1, 0.5)
+
+##E[D|X; iota]
+iota.true = c(0.5, 0.5, -1)
+
+##E[Y|X; theta]
+theta.true = c(0.1, -0.4, 0.8)
+
+############ obtain true ATE ###############
+data_temp <- data_gen(alpha.true, beta.true, iota.true, theta.true, zeta.true,
+                       n=2000000, k=0.1, sigma=1, Y.type="binary", seed=123)
+
+ATE.true  <- mean(data_temp$delta.true)
+```
+
+## Simulation results
+
+```{r, results='asis', echo=FALSE}
+########### RUN SETTING III ####################
+quantiles <- c(0.2, 0.5, 0.8)
+
+for (qz in quantiles){
+  cat(sprintf("\n\n## quantile.z = %.2f\n\n", qz))
+
+  # ---- run all scenarios for this quantile ----
+  outs <- setNames(lapply(scenarios, function(sc) {
+    message("Running scenario: ", sc, " | quantile.z = ", qz)
+    run_iv_sim(
+      reps = reps, n = n,
+      alpha.true = alpha.true, beta.true = beta.true,
+      iota.true = iota.true, theta.true = theta.true, zeta.true = zeta.true,
+      scenario = sc, 
+      z.type = "dichotomize", quantile.z = qz,
+      ncores = ncores_use
+    )
+  }), scenarios)
+  
+  scenarios_df <- lapply(outs, function(o) {
+    df <- if (!is.null(o$raw)) as.data.frame(o$raw) else as.data.frame(o)
+    dplyr::select(df, dplyr::all_of(variable.name))
+  })
+
+  res_list  <- lapply(scenarios_df, summarize_metrics, vars = variable.name)
+
+  bias_se_mat <- do.call(rbind, lapply(res_list, function(x)
+                         fmt_bias_se(x$bias, x$se, mult_bias = scale_bias, mult_se = scale_se)))
+  
+  rmse_mat    <- do.call(rbind, lapply(res_list, function(x) fmt_rmse(x$rmse)))
+
+  rownames(bias_se_mat) <- unname(scenario_labels[names(scenarios_df)])
+  rownames(rmse_mat)    <- unname(scenario_labels[names(scenarios_df)])
+  colnames(bias_se_mat) <- method_labels
+  colnames(rmse_mat)    <- method_labels
+
+  S <- nrow(bias_se_mat)
+  metric_col   <- c(rep("Bias (SE)", S), rep("RMSE", S))
+  scenario_col <- c(rownames(bias_se_mat), rownames(rmse_mat))
+
+  vals_mat <- rbind(bias_se_mat, rmse_mat)
+  table_df <- data.frame(
+    Metric   = metric_col,
+    Scenario = scenario_col,
+    vals_mat,
+    check.names = FALSE
+  )
+
+  xt <- xtable(
+    table_df,
+    align = c("l", "l", "l", rep("c", length(method_labels))),
+    caption = sprintf("Monte Carlo results of the proposed estimators by dichotomizing a continuous IV for quantile.z = %.2f (true ATE = %.3f), under various model misspecification scenarios. The data is simulated under Setting I, and the working models are adapted from Setting II. The true value of the ATE is 0.095. Bias and Monte Carlo SE (in parentheses) are scaled by 1000",
+                      qz, ATE.true)
+  )
+
+  add_cmds <- list(
+  pos = list(0, S),
+  command = c("\\hline\\hline\n", "\\hline\\hline\n")
+  )
+
+  print(
+    xt,
+    include.rownames = FALSE,
+    caption.placement = "top",       
+    table.placement   = "!ht",        
+    hline.after = c(-1, nrow(table_df)),  
+    add.to.row = add_cmds,
+    sanitize.text.function = identity,       
+    sanitize.colnames.function = identity,
+    sanitize.rownames.function = identity
+  )
+}
+```
+
+
