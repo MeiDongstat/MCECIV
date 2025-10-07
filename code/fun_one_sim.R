@@ -54,8 +54,9 @@ run_iv_sim <- function(
     )
   }
   
-  # --- cluster setup (auto-cleanup) -----------------------------------------
-  cl <- NULL; created <- FALSE
+
+  cl <- NULL
+  created <- FALSE
   if (ncores > 1) {
     cl <- parallel::makeCluster(ncores)
     doParallel::registerDoParallel(cl)
@@ -63,18 +64,18 @@ run_iv_sim <- function(
     on.exit({ if (created) parallel::stopCluster(cl) }, add = TRUE)
     
     parallel::clusterEvalQ(cl, {
-      source("fun_generate_data.R")
-      source("fun_estimation.R")
+      source("code/fun_generate_data.R")
+      source("code/fun_estimation.R")
       NULL
     })
-    # NEW: export scalars used inside foreach
+
     parallel::clusterExport(
       cl,
       varlist = c("n","alpha.true","beta.true","iota.true","theta.true","zeta.true","link_delta"),
       envir = environment()
     )
   } else {
-    doParallel::registerDoParallel(cores = 1)  # no clusterEvalQ here when cl is NULL
+    doParallel::registerDoParallel(cores = 1)  
   }
   
   doRNG::registerDoRNG(seed)
@@ -87,7 +88,7 @@ run_iv_sim <- function(
                              "zeta.true", "z.type", "quantile.z"),
                    .options.RNG=seed) %dorng% {
                      
-                    if(z.type == "binary"){
+                    if(z.type == "binary"){ # if we have a binary IV
                       data <- data_gen_binZ(alpha.true, beta.true, iota.true, theta.true, zeta.true,
                                             n, Y.type="binary", seed=i)
                       ATE.crude <- with(data$dat, mean(Y[D==1]) - mean(Y[D==0]))
@@ -104,7 +105,7 @@ run_iv_sim <- function(
                                              y = data$dat$Y,
                                              link_delta = link_delta
                       )
-                    } else if(z.type == "continuous"){
+                    } else if(z.type == "continuous"){ # if we have a continuous IV
                       data <- data_gen(alpha.true, beta.true, iota.true, theta.true, zeta.true,
                                         n, sigma=1, Y.type="binary", seed=i)
                       
@@ -121,7 +122,7 @@ run_iv_sim <- function(
                         z = data$dat$Z, d = data$dat$D, y = data$dat$Y,
                         link_delta = link_delta
                       )
-                    } else{
+                    } else{ # if we have a continuous IV but we dichotomize it into a binary IV
                       data <- data_gen(alpha.true, beta.true, iota.true, theta.true, zeta.true,
                                        n, sigma=1, Y.type="binary", seed=i)
                       

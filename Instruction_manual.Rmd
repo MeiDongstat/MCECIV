@@ -9,10 +9,9 @@ output:
 ```{r setup, include=FALSE}
 rm(list = ls(envir = .GlobalEnv, all.names = TRUE), envir = .GlobalEnv)
 
-setwd("/Users/mei/Library/Mobile Documents/com~apple~CloudDocs/PhD/Thesis/project1/code/simulation/code_ATE_continuousIV/")
-source("fun_generate_data.R")
-source("fun_estimation.R")
-source("fun_one_sim.R")
+source("code/fun_generate_data.R")
+source("code/fun_estimation.R")
+source("code/fun_one_sim.R")
 library(foreach)
 library(doParallel)
 library(doRNG)
@@ -231,7 +230,7 @@ table_df <- data.frame(
   check.names = FALSE
 )
 
-## ---- LaTeX table -------------------------------------------------------------
+## LaTeX table
 library(xtable)
 # align: Metric (l), Scenario (l), then one 'c' per method
 align_vec <- c("l", "l", "l", rep("c", length(method_labels)))
@@ -244,7 +243,7 @@ add_cmds <- list(
 )
 ```
 
-```{r, results='asis'}
+```{r, results='asis', echo=FALSE, message=FALSE}
 print(
   xt,
   include.rownames = FALSE,
@@ -254,7 +253,9 @@ print(
   add.to.row = add_cmds,
   sanitize.text.function = identity,       
   sanitize.colnames.function = identity,
-  sanitize.rownames.function = identity
+  sanitize.rownames.function = identity,
+  comment = FALSE,
+  timestamp = FALSE
 )
 ```
 
@@ -383,7 +384,7 @@ table_df <- data.frame(
   check.names = FALSE
 )
 
-## ---- LaTeX table -------------------------------------------------------------
+## LaTeX table 
 library(xtable)
 # align: Metric (l), Scenario (l), then one 'c' per method
 align_vec <- c("l", "l", "l", rep("c", length(method_labels)))
@@ -396,7 +397,7 @@ add_cmds <- list(
 )
 ```
 
-```{r, results='asis'}
+```{r, results='asis', echo=FALSE, message=FALSE}
 print(
   xt,
   include.rownames = FALSE,
@@ -406,7 +407,9 @@ print(
   add.to.row = add_cmds,
   sanitize.text.function = identity,       
   sanitize.colnames.function = identity,
-  sanitize.rownames.function = identity
+  sanitize.rownames.function = identity,
+  comment = FALSE,
+  timestamp = FALSE
 )
 ```
 
@@ -445,14 +448,13 @@ ATE.true  <- mean(data_temp$delta.true)
 
 ## Simulation results
 
-```{r, results='asis', echo=FALSE}
+```{r, results='asis', echo=FALSE, message=FALSE}
 ########### RUN SETTING III ####################
 quantiles <- c(0.2, 0.5, 0.8)
 
 for (qz in quantiles){
-  cat(sprintf("\n\n## quantile.z = %.2f\n\n", qz))
 
-  # ---- run all scenarios for this quantile ----
+  # run all scenarios for this quantile 
   outs <- setNames(lapply(scenarios, function(sc) {
     message("Running scenario: ", sc, " | quantile.z = ", qz)
     run_iv_sim(
@@ -515,7 +517,9 @@ for (qz in quantiles){
     add.to.row = add_cmds,
     sanitize.text.function = identity,       
     sanitize.colnames.function = identity,
-    sanitize.rownames.function = identity
+    sanitize.rownames.function = identity,
+    comment = FALSE,
+    timestamp = FALSE
   )
 }
 ```
